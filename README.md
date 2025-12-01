@@ -106,14 +106,12 @@ If you use this code in your research, please cite:
 }
 ```
 
-## License
-
-[Specify license - MIT and GPL are common for academic code.  Consult your institution's policy]
 
 ## Contact
 
 Mia Meyer - miameyer15@gmail.com
-[Link to thesis PDF when available]
+
+[The thesis will be linked here when published]
 
 ## Acknowledgments
 
