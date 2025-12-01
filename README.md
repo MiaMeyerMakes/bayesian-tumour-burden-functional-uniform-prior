@@ -20,47 +20,45 @@ The FUP has the theoretical advantages of being transformation invariant and sat
 ## Repository Structure
 
 ```
+C:
 .
-├── Fixed-effects models
-│   ├── Emax-Jeffreys-MH-3April.R
-│   ├── Emax-MH-3April.R
-│   ├── Emax-Unif-MH-8April.R
-│   ├── Exp-Jeffreys-MH-6April.R
-│   ├── Exp-MH-19May.R
-│   ├── Exp-Unif-MH-8April.R
-│   ├── Power-Jeffreys-MH-8April.R
-│   ├── Power-MH-8April.R
-│   ├── Power-Unif-MH-8April.R
-│   ├── sensitivity_analysis_emax_v2.R
-│   ├── sensitivity_analysis_exponential.R
-│   └── sensitivity_analysis_power.R
-├── Literature review studies
-│   ├── Introduction_code copy.Rmd
-│   ├── Introduction_code.Rmd
-│   ├── Introduction_Theoph-compare-colours.R
-│   └── trace_plots.pdf
-├── Mixed-effects models
-│   ├── growth_stan_mixed_FUP-final.R
-│   ├── growth_stan_mixed_JEFF-final.R
-│   ├── growth_stan_mixed_UNIF-final.R
-│   ├── mixed-tgi-MHstan-fup-reps-v7-newdata.R
-│   ├── mixed-tgi-MHstan-jeffreys-reps-newdata-v2.R
-│   ├── mixed-tgi-MHstan-uniform-reps-MEDIUM-newdata.R
-│   ├── mixed-tgi-MHstan-uniform-reps-NARROW-newdata.R
-│   ├── mixed-tgi-MHstan-uniform-reps-WIDE-newdata.R
-│   ├── shrinkage_stan_mixed_FUP-final.R
-│   ├── shrinkage_stan_mixed_JEFF-final.R
-│   ├── shrinkage_stan_mixed_UNIF-final.R
-│   ├── tgi-mixed-debug.R
-│   └── tgi-mixed-process-results.R
-└── Prime study
-    ├── dataset_filter.R
-    ├── mixed-tgi-MHstan-fup-PRIME-v1.R
-    ├── mixed-tgi-MHstan-jeff-PRIME-v1.R
-    ├── mixed-tgi-MHstan-unif-PRIME-v1.R
-    ├── prime_intro.R
-    ├── results_analysis.R
-    └── tgi-prime-plots.R
+|   README.md
++---Fixed-effects models
+|       Emax-FUP.R
+|       Emax-Jeffreys.R
+|       Emax-Unif.R
+|       Emax-uniform-coverage.R
+|       Exp-FUP.R
+|       Exp-Jeffreys.R
+|       Exp-Unif.R
+|       Exp-uniform-coverage.R
+|       Power-Jeffreys.R
+|       Power-MH.R
+|       Power-Unif.R
++---Literature review
+|       Literature-review-Puromycin.Rmd
+|       Literature-review-Theophylline.Rmd
++---Mixed-effects models
+|       growth_stan_mixed_FUP.R
+|       growth_stan_mixed_JEFF.R
+|       growth_stan_mixed_UNIF.R
+|       mixed-tgi-fup.R
+|       mixed-tgi-jeffreys.R
+|       mixed-tgi-uniform-MEDIUM.R
+|       mixed-tgi-uniform-NARROW.R
+|       mixed-tgi-uniform-WIDE.R
+|       shrinkage_stan_mixed_FUP.R
+|       shrinkage_stan_mixed_JEFF.R
+|       shrinkage_stan_mixed_UNIF.R
+|       tgi-mixed-analyse-results.R
+|       tgi-mixed-filter-chains.R
+\---Prime study
+        create-prime-subset-sample.R
+        mixed-tgi-MHstan-fup-PRIME.R
+        mixed-tgi-MHstan-jeff-PRIME.R
+        mixed-tgi-MHstan-unif-PRIME.R
+        plot-tgi-model-fit.R
+        prime-tgi-results-analyses.R
 ```
 
 ## Installation
