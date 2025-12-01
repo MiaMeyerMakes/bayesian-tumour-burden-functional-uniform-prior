@@ -1,0 +1,203 @@
+# Load MASS
+library(MASS)  # For multivariate normal
+library(RColorBrewer)
+library(HDInterval)
+library(coda)
+
+setwd("~/Desktop/Thesis/code")
+# Set seed for reproducibility
+set.seed(123)
+
+### Create the exponential sample datasets ######################################
+
+# function to create datasets
+sim_exponential_datasets <- function(numsets, n, theta_true, sigma2_true) {
+  data <- matrix(nrow = n, ncol = (1+numsets))
+  x <- seq(0, 10, length.out = n)  # Random x values
+  data[,1] <- x
+  noise_matrix <- matrix(data = rnorm(n*numsets, 0, sqrt(sigma2_true)), nrow = n, ncol = numsets)
+  y <- exp(-theta_true * x) + noise_matrix
+  data[,2:(numsets+1)] <- y
+  colnames(data) <- c('x',apply(matrix(c(rep('sample',numsets), 1:numsets), ncol = 2, byrow = FALSE), 1, function(x) {paste(x[1], x[2], sep="")}))
+  data
+  return(data)
+}
+
+# plot and test on small sample size and numsets size for sense check
+testdata <- sim_exponential_datasets(numsets=25, n=15, theta_true=0.18, sigma2_true=0.1)
+cols = colorRampPalette(brewer.pal(11, "Spectral"))(20)
+plot(x = testdata[,1], y = exp(-0.18 * testdata[,1]), type = 'l', col = 'black',
+     ylim = c(-2,3), lwd = 3, main = "Simulated datasets from exponential model",
+     xlab = "x", ylab = "exponential model")
+for (i in 2:20)
+{
+  lines(x = testdata[,1], y = testdata[,i], col = cols[i])
+}
+
+# clear history before we start simulation - keep the data simulating function
+rm(list = setdiff(ls(), c("sim_exponential_datasets")))
+
+# Simulate data for testing with n = 15, 50 and 100
+numsets <- 1000
+theta_true <- 0.18  # True value of theta
+data15 <- sim_exponential_datasets(numsets=numsets, n=15, theta_true=0.18, sigma2_true=0.1)
+data50 <- sim_exponential_datasets(numsets=numsets, n=50, theta_true=0.18, sigma2_true=0.1)
+data100 <- sim_exponential_datasets(numsets=numsets, n=100, theta_true=0.18, sigma2_true=0.1)
+
+#### MH Sampler #################################################################
+
+# functions to compute priors, posterior and likelihood
+log_prior_theta <- function(theta) {-10*theta + 0.5*(log(-200*theta^2-20*theta-1+exp(20*theta))-log(theta^3))}
+log_likelihood <- function(theta, sigma2, x, y) {
+  n = length(x)
+  log_lik = -0.5*n*log(2*pi*sigma2) + ((-0.5/sigma2)*sum((y-exp(-theta*x))^2))
+  return(log_lik)
+  }
+
+log_posterior <- function (theta, sig2, x, y) {
+  log_post = log_likelihood(theta, sig2, x, y) + 
+    log_prior_theta(theta)
+  return(log_post)
+  }
+
+# Metropolis-Hastings algorithm
+metropolis_hastings <- function(dataset, num_iterations, burn_in, sigma_theta, 
+                                initial_theta, sigma2 = 0.1) {
+  n <- nrow(dataset)
+  numsets <- ncol(dataset)-1
+  
+  # Storage for posterior samples
+  samples_theta <- matrix(NA, nrow = num_iterations, ncol = numsets)
+  
+  x <- dataset[,1] # x is always the first column of the given dataset
+  
+  theta_acceptance <- numeric()
+  
+  # Generate new chain for each dataset
+  for (setnr in 2:ncol(dataset))
+  {
+    print(paste("Starting MH for sample", setnr))
+    # Initialize the chain
+    theta_current <- initial_theta
+    
+    # extract the simulated y from dataset
+    y <- dataset[,setnr]
+    
+    theta_acceptance_counter <- 0
+    # Metropolis-Hastings loop for that sample
+    for (iteration in 1:num_iterations) {
+      # THETA SAMPLER
+      
+      # Step 1: Propose a new values for theta
+      theta_star <- abs(rnorm(1, theta_current, sigma_theta))
+      
+      # Step 2: Compute acceptance ratio for theta
+      alpha_theta <- log_posterior(theta_star, sigma2, x, y)-
+        log_posterior(theta_current, sigma2, x, y)
+      
+      # Step 3: Accept or reject theta
+      u <- runif(1)
+      if (u < exp(alpha_theta))
+      {
+        theta_current <- theta_star
+        theta_acceptance_counter = theta_acceptance_counter + 1
+      }
+      
+      samples_theta[iteration,setnr-1] <- theta_current
+    }
+    theta_acceptance <- append(theta_acceptance, 
+                               sum(theta_acceptance_counter)/num_iterations)
+  }
+  
+  # Plot the first sample's chain for sense check (plot with burn in)
+  plot(samples_theta[,1], type = 'l', col = 'blue', xlab = 'Iteration', 
+       ylab = 'Theta', main = 'Trace plot of Theta')
+ 
+  print(paste("Theta acceptance:", mean(theta_acceptance)))
+
+  # Return MH samples after removing burn-in
+  return(list(theta_MH = samples_theta[(burn_in+1):(num_iterations),]))
+}
+
+# Parameters for the Metropolis-Hastings algorithm
+num_iterations <- 10000  # Total number of iterations
+burn_in <- 1000          # Burn-in period
+sigma_theta <- 0.05      # Step size for theta
+initial_theta <- 2    # Initial value for theta
+sigma2 <- 0.1
+# Run the Metropolis-Hastings sampler
+n15_samples_list <- metropolis_hastings(data15, num_iterations, 
+                                        burn_in, sigma_theta,
+                                        initial_theta, sigma2)
+n50_samples_list <- metropolis_hastings(data50, num_iterations, 
+                                        burn_in, sigma_theta,
+                                        initial_theta, sigma2)
+n100_samples_list <- metropolis_hastings(data100, num_iterations, 
+                                         burn_in, sigma_theta, 
+                                         initial_theta, sigma2)
+
+# # Save samples to prevent unnecessary re-runs
+# write.csv(n15_samples_list[["theta_MH"]], "theta_posterior_n15.csv", 
+#           row.names = FALSE, col.names = FALSE)
+# write.csv(n50_samples_list[["theta_MH"]], "theta_posterior_n50.csv", 
+#           row.names = FALSE, col.names = FALSE)
+# write.csv(n100_samples_list[["theta_MH"]], "theta_posterior_n100.csv", 
+#           row.names = FALSE, col.names = FALSE)
+
+# n15_samplez <- read.csv("theta_posterior_n15.csv", header = TRUE)
+# n50_samplez <- read.csv("theta_posterior_n50.csv", header = TRUE)
+# n100_samplez <- read.csv("theta_posterior_n100.csv", header = TRUE)
+
+# Function to calculate the coverage probabilities
+statistics_calc <- function(theta_true, samples, is_list = TRUE) {
+  if (is_list)
+  {
+    # extract theta posteriors
+    thetas = as.matrix(samples[["theta_MH"]])
+  } else {
+    thetas = as.matrix(samples)
+  }
+
+  hdi_interval90 <- apply(thetas, 2, function(x) hdi(x, .90))
+  CP90_in <- hdi_interval90[1,] <= theta_true & hdi_interval90[2,] >= theta_true
+  CP90 <- sum(CP90_in)/ncol(thetas)
+  hdi_interval95 <- apply(thetas, 2, function(x) hdi(x, .95))
+  CP95_in <- hdi_interval95[1,] <= theta_true & hdi_interval95[2,] >= theta_true
+  CP95 <- sum(CP95_in)/ncol(thetas)
+  
+  # plot a chain for sense-check
+  plot(thetas[,1], type = 'l', col = 'blue', xlab = 'Iteration', ylab = 
+         'Theta', main = 'Trace plot of Theta')
+  abline(h=hdi_interval90[1,1], col = 'green')
+  abline(h=hdi_interval90[2,1], col = 'green')
+  abline(h=hdi_interval95[1,1], col = 'red')
+  abline(h=hdi_interval95[2,1], col = 'red')
+  
+  ILE90 <- mean(hdi_interval90[2,] - hdi_interval90[1,])
+  ILE95 <- mean(hdi_interval95[2,] - hdi_interval95[1,])
+  
+  posterior_means <- apply(thetas, 2, mean)
+  posterior_median <- apply(thetas, 2, median)
+  
+  MAE_mean <- mean(abs(posterior_means-theta_true))
+  MAE_median <- mean(abs(posterior_median-theta_true))
+  
+  results <- c(CP90, CP95, ILE90, ILE95, MAE_mean, MAE_median)
+  return(results)
+}
+
+stats15 = statistics_calc(theta_true, n15_samples_list)
+stats50 = statistics_calc(theta_true, n50_samples_list)
+stats100 = statistics_calc(theta_true, n100_samples_list)
+
+exp_func_statistics_table = rbind(stats15, stats50, stats100)
+row.names(exp_func_statistics_table) = c("n=15", "n=50", "n=100")
+colnames(exp_func_statistics_table) = c("CP_90", "CP_95", "ILE90", 
+                               "ILE95", "MAE_mean", "MAE_median")
+exp_func_statistics_table
+
+#       CP_90 CP_95      ILE90      ILE95   MAE_mean MAE_median
+# n=15  0.920 0.962 0.24630033 0.31329100 0.07319090 0.05636168
+# n=50  0.918 0.959 0.08748107 0.10503047 0.02098785 0.02044218
+# n=100 0.903 0.950 0.06053799 0.07239078 0.01484585 0.01470115
+

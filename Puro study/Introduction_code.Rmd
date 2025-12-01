@@ -1,0 +1,618 @@
+---
+title: "Introduction_and_prep"
+author: "M Meyer (22675760)"
+date: "2024-12-23"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(nimble)
+library(ggplot2)
+library(coda)
+library(MCMCvis)
+library(wesanderson)
+library(nlme)
+library(knitr)
+library(rstan)
+library(tidyverse)
+```
+
+# Example 1: Puromycin dataset
+
+*The `Puromycin` data frame has 23 rows and 3 columns of the **reaction velocity** versus **substrate concentration** in an enzymatic reaction involving untreated cells or cells treated with Puromycin.*
+
+Load in the data:
+
+```{r}
+library("datasets")
+puro <- datasets::Puromycin
+puro$nstate <- abs(as.numeric(puro$state)-2) #1-0 treatment indicator
+```
+
+Visual exploration:
+
+```{r}
+ggplot(Puromycin, aes(x = conc, y = rate, color = state)) +
+  geom_point(size = 2) +
+  labs(
+    title = "Rate vs Concentration by Treatment State",
+    x = "Concentration",
+    y = "Rate",
+    color = "Treatment State"
+  ) +
+ # geom_smooth(size=1)+
+  theme_minimal()
+```
+
+## Frequentist approach
+
+**Michaelis-Menten kinetic model**. Note that starting values are given in the documentation for the `Puromycin` dataset in the `datasets` package.
+
+The model is: $$
+f(\textbf{x}, \boldsymbol{\theta})=\frac{(\theta_1+\theta_3.x_2)\times x_1}{\theta_2 + x_1}+\epsilon
+$$ where $\epsilon\sim N(0, \sigma^2)$.
+
+Here $f$ is the response variable and represents the reaction rate, $\theta_1$ represents the maximum reaction rate and $\theta_2$ is the *Michaelis constant*, which is the substrate concentration at which the reaction rate is half of $\theta_1$. Lastly, we have added the conditioning on the state variable to the traditional model and therefore $\theta_3$ is included as the difference in rate for the trajectories of the two classes, with $x_2$ serving as an indicator function for treated subjects. [Here](https://www.datacamp.com/tutorial/introduction-to-non-linear-model-and-insights-using-r) is a link to the source of the model explanation and code.
+
+From the model below, the estimates indicate that the untreated group has a maximum reaction rate of 166.60, the treatment increases the maximum reaction rate by 42.03 to a rate of 208.63. Lastly, the Michaelis constant is estimated as $\hat{K}=0.05797$ and reflects the subtrate affinity.
+
+The model provides a good fit, as is indicated by the low residual standard error of 10.59 and the high statistical significance of all three parameters.
+
+```{r, fig.asp=1}
+require(stats); require(graphics)
+
+# options(show.nls.convergence=FALSE)
+
+fm0 <- nls(rate ~ (Vmax + incr*(state=="treated"))*conc/(K+conc), Puromycin,
+               list(Vmax=160, incr=40, K=0.05))
+
+summary(fm0)
+(fm0$convInfo)$finIter
+
+mm_fit <- predict(fm0, newdata= Puromycin)
+puro$mod_est <- mm_fit
+
+# Plot using ggplot2
+ggplot(puro, aes(x = conc, y = rate, color = state, shape = state)) +
+  geom_point(size = 2) +
+  geom_line(data = puro, aes(x = conc, y = mod_est, color = state), linewidth = 0.8) +
+  labs(
+    title = "Puromycin Data and Fitted Michaelis-Menten Curves",
+    x = "Substrate concentration (ppm)",
+    y = "Reaction velocity (counts/min/min)",
+    color = "Treatment State",
+    shape = "Treatment State"
+  ) +
+  theme_minimal()
+```
+
+Next we can evaluate the assumption of normally distributed residuals.
+
+```{r, fig.asp=1}
+# Extract residuals
+residuals <- residuals(fm0)
+var(residuals)
+# Create QQ plot
+qqnorm(residuals, main = NULL)
+qqline(residuals, col = "red", lwd = 2)
+```
+
+## Bayesian approach
+
+### Theory recap (for myself)
+
+Remember that we want to use a non-informative prior when we want to incorporate as little as possible prior information into the analysis and allow the data to 'speak for itself'. This is often the case when we don't have enough prior knowledge or when we want the analysis to be as objective as possible.
+
+The **Jeffreys' prior** is a type of *non-informative prior* used in Bayesian statistics. It is designed to be invariant under reparameterisation, meaning the results of Bayesian inference remain the same regardless of how the parameter of interest is expressed (e.g., in different scales). This property makes the Jeffreys' prior particularly useful in situations where there is no natural or obvious choice for a prior distribution.
+
+The Jeffreys' prior is proportional to the square root of the determinant of the Fisher information matrix: $$
+\pi(\theta) ∝\sqrt{det\left(I(\theta)\right)} $$
+
+The *classical* Jeffreys' prior refers to the application of Jeffreys' method for constructing a non-informative prior for a **single parameter**. It is often used as the standard or canonical prior in Bayesian statistics when no prior information is available. This prior is proportional to the square root of the Fisher information for the parameter of interest. $$
+\pi(\theta) ∝\sqrt{I\left(\theta\right)} $$
+
+Remember that the Fisher information matrix is: $$
+I(\theta)=-E\left[\frac{\partial^2 \log L(\theta)}{\partial\theta^2}\right]$$
+
+First we define the model in `nimble`:
+
+```{r}
+conc <- Puromycin$conc
+y <- Puromycin$rate
+state <- state_numeric <- ifelse(Puromycin$state == "treated", 1, 0)
+
+# Define the model in nimble
+# code <- nimbleCode({
+#   for (i in 1:N) {
+#     y[i] ~ dnorm(mu[i], tau)  # Likelihood
+#     mu[i] <- ((Vm + delV * I(state[i] == "treated")) * conc[i]) / (K + conc[i])  # Michaelis-Menten equation with treatment effect
+#   }
+#   
+#   # Priors
+#   Vm ~ dnorm(0, 1 / 10^6)  # Prior for Vm
+#   delV ~ dnorm(0, 1 / 10^6) # Prior for delV (change in Vm)
+#   K ~ dnorm(0, 1 / 10^6)    # Prior for K
+#   tau ~ dgamma(10^-3, 10^-3) # Prior for precision (inverse of variance)
+#   sigma2 <- 1 / tau         # Variance for residual error
+# })
+# Define the model in nimble with numeric state values
+code <- nimbleCode({
+  for (i in 1:N) {
+    y[i] ~ dnorm(mu[i], tau)  # Likelihood
+    mu[i] <- ((Vm + delV * state[i]) * conc[i]) / (K + conc[i])  # Michaelis-Menten equation with numeric state interaction
+  }
+  
+  # Priors
+  Vm ~ dnorm(0, 1 / 10^6)  # Prior for Vm
+  delV ~ dnorm(0, 1 / 10^6) # Prior for delV (change in Vm)
+  K ~ dnorm(0, 1 / 10^6)    # Prior for K
+  tau ~ dgamma(10^-3, 10^-3) # Prior for precision (inverse of variance)
+  sigma2 <- 1 / tau         # Variance for residual error
+})
+
+
+# Convert data into nimble format
+data <- list(y = y)
+constants <- list(conc = conc, state = state, N = length(y))
+
+# inits <- function() list(Vm = rnorm(1, 1, 0.1), delV = rnorm(1, 0, 0.1), K = rnorm(1, 1, 0.1), tau = rgamma(1, 1, 1))
+
+# Correct the inits definition by making it a list (not a function)
+inits <- list(Vm = rnorm(1, 1, 0.1), 
+              delV = rnorm(1, 0, 0.1), 
+              K = rnorm(1, 1, 0.1), 
+              tau = rgamma(1, 1, 1))
+
+# Create a nimble model
+model <- nimbleModel(code, data = data, constants = constants, inits = inits)
+
+# Compile the model
+compiled_model <- compileNimble(model)
+
+# Configure the MCMC
+conf <- configureMCMC(model)
+conf$printSamplers()
+
+# Build and compile the MCMC
+mcmc <- buildMCMC(conf)
+compiled_mcmc <- compileNimble(mcmc, project = model)
+
+# Run three chains, each with 15,000 iterations
+set.seed(123)
+samples <- runMCMC(compiled_mcmc, niter = 15000, nburnin = 5000, nchains = 3)
+
+samplesummary <- MCMCsummary(object = samples, round = 8)
+samplesummary
+
+K_bayes <- (samplesummary$mean)[1]
+Vm_bayes <- (samplesummary$mean)[2]
+delV_bayes <- (samplesummary$mean)[3]
+sigma2_bayes <- 1/(samplesummary$mean)[4]
+
+bayes_pred <- (Vm_bayes + delV_bayes * state) * conc / (K_bayes + conc)
+
+puro$bayes <- bayes_pred
+```
+
+```{r}
+# Load required package
+library(coda)
+
+# Convert NIMBLE samples to mcmc.list object for coda
+# NIMBLE returns a list of matrices (one per chain)
+samples_mcmc <- as.mcmc.list(lapply(samples, mcmc))
+
+# Calculate Gelman-Rubin diagnostic
+gelman_diag <- gelman.diag(samples_mcmc)
+print(gelman_diag)
+
+# Extract just the point estimates (upper CI is also available)
+gelman_point <- gelman_diag$psrf[, "Point est."]
+print(gelman_point)
+
+# Check if all are < 1.1 (common threshold, 1.01 is stricter)
+all(gelman_point < 1.1)
+
+# For your writeup, you can report:
+max_rhat <- max(gelman_point)
+cat("Maximum R-hat across all parameters:", round(max_rhat, 3))
+
+# Calculate effective sample size
+ess <- effectiveSize(samples_mcmc)
+print(ess)
+
+# TRACE PLOTS - Fix the margin error
+# Option 1: Increase plot window size
+dev.new(width=12, height=8)  # Opens new larger window
+
+# Option 2: Use MCMCvis (better formatting)
+library(MCMCvis)
+MCMCtrace(samples, 
+          params = c('Vm', 'delV', 'K', 'tau'),
+          pdf = FALSE,
+          Rhat = TRUE,
+          n.eff = TRUE)
+
+# Option 3: Plot individually to avoid margin issues
+par(mfrow=c(2,2), mar=c(4,4,2,1))
+for(param in c('K', 'Vm', 'delV', 'tau')) {
+  plot(samples_mcmc[, param], main=param, density=FALSE)
+}
+
+# Option 4: Save to file instead
+pdf("trace_plots.pdf", width=12, height=8)
+plot(samples_mcmc)
+dev.off()
+```
+
+
+And plot the two models together. My plot isn't the smooth one that Shuting has - she used a smoother on the plot.
+
+```{r}
+# Plot using ggplot2
+ggplot(puro, aes(x = conc, y = rate, color = state, shape = state)) +
+  geom_point(size = 2) +
+  geom_line(data = puro, aes(x = conc, y = mod_est, color = state, linetype = "Frequentist"), linewidth = 0.7) +
+  geom_line(data = puro, aes(x = conc, y = bayes, color = state, linetype = "Bayesian"), linewidth = 0.7) +
+  labs(
+    title = "Puromycin Data and Fitted Michaelis-Menten Curves",
+    x = "Substrate concentration (ppm)",
+    y = "Reaction velocity (counts/min/min)",
+    color = "Treatment State",
+    shape = "Treatment State",
+    linetype = "Approach"
+  ) +
+  # scale_linetype_manual(values = c("Frequentist" = "solid", "Bayesian" = "dashed")) +  # Custom linetypes
+  theme_minimal()
+```
+
+
+I am unable to get the Geweke diagnostic and the Gelman-Rubin diagnostic. It doesn't want to accept my argument.
+
+```{r}
+
+```
+
+```{r}
+ggplot(puro, aes(x = conc, y = rate, color = state, shape = state)) +
+  geom_point(size = 2) +
+  geom_line(data = puro, aes(x = conc, y = mod_est, color = state, linetype = "Frequentist"), linewidth = 0.7) +
+  geom_smooth(data = puro, aes(x = conc, y = mod_est, color = state, linetype = "Frequentist"), 
+              method = "loess", se = FALSE, linewidth = 0.7) +  # Smoothing applied here
+  geom_smooth(data = puro, aes(x = conc, y = bayes, color = state, linetype = "Bayesian"), 
+              method = "loess", se = FALSE, linewidth = 0.7) +  # Smoothing applied here
+  labs(
+    title = "Puromycin Data and Fitted Michaelis-Menten Curves",
+    x = "Substrate concentration (ppm)",
+    y = "Reaction velocity (counts/min/min)",
+    color = "Treatment State",
+    shape = "Treatment State",
+    linetype = "Approach"
+  ) +
+  scale_linetype_manual(values = c("Frequentist" = "solid", "Bayesian" = "dashed")) +
+  theme_minimal()
+```
+
+```{r}
+# # Geweke diagnostic
+# geweke <- geweke.diag(samples)
+# print(geweke)
+# 
+# # Gelman-Rubin diagnostic
+# gelman <- gelman.diag(samples)
+# print(gelman)
+```
+
+# Example 2: Theophyline data
+
+Theophylline is a methylxanthine drug used in therapy for respiratory diseases such as chronic obstructive pulmonary disease (COPD) and asthma under a variety of brand names. In the study, Theophylline was administered orally to 12 subjects whose serum concentrations were measured at 11 times over the next 25 hours.
+
+The dataframe has 132 rows and 5 columns of data from the experiment above.
+
+Get an idea of how the data looks:
+
+```{r}
+head(Theoph)
+# require(stats); require(graphics)
+# coplot(conc ~ Time | Subject, data = Theoph, show.given = FALSE)
+
+# Plot using ggplot2
+ggplot(Theoph, aes(y = conc, x = Time, color = Subject)) +
+  geom_point(size = 2) +
+  geom_line(linewidth = 0.8) +
+  labs(
+    title = "Theophylline data",
+    y = "Theophylline concentration (mg/L)",
+    x = "Time since drug administration (hr)",
+    color = "Subject",
+  ) +
+  theme_minimal()
+```
+
+A nonlinear mixed model is required to correctly capture the mean structure and covariance structure in the dataset. The model proposed by Shuting is the first-order compartment model and is specified as follows:
+
+$$
+\begin{aligned}
+  C(t) &= \frac{{\text{Dose} \cdot k_{a,i} }}
+{{V_i \cdot \left(k_{a,i}-k_{e,i})\right)}}
+\left( e^{-k_{e,i}\cdot t_{ij}}-e^{-k_{a,i}\cdot t_{ij}}\right)
++ \epsilon_{ij}\\
+C(t) &= \frac{{\text{Dose} \cdot \exp(\beta_1+b_{1i}) }}
+{{\exp(\beta_3+b_{3i})\cdot \left(\exp(\beta_1+b_{1i})-\exp(\beta_2+b_{2i})\right)}}
+\left( e^{-\exp(\beta_2+b_{2i})\cdot t_{ij}}-e^{-\exp(\beta_1+b_{1i})\cdot t_{ij}}\right)
++ \epsilon_{ij}
+\end{aligned}
+$$
+
+where
+
+$$
+  \epsilon_{ij}\sim N(0, \sigma^2_{res})\\
+  k_{a,i}= \exp(\beta_1+b_{1i}),\quad b_{1i}\sim N(0, \sigma^2_{1}) \\
+  k_{e,i}= \exp(\beta_2+b_{2i}),\quad b_{2i}\sim N(0, \sigma^2_{2}) \\
+  V_i = \exp(\beta_3+b_{3i}),\quad b_{3i}\sim N(0, \sigma^2_{3})
+$$
+
+However, in the documentation for `SSfol`, we have the expression for the first-order compartment function as below: `Dose * exp(lKe+lKa-lCl) * (exp(-exp(lKe)*t) - exp(-exp(lKa)*t))/ (exp(lKa) - exp(lKe))`
+
+## Frequentist approach
+
+For the sake of continuing with the analyses, we use the formula from the documentation. From the results for $β_C$ we see that the estimate is $\hat{β}_C=-3.214451$ while for Shuting it was $-0.7818$. This actually seems like a big difference, but the p-values of the results are the same.
+
+See below that get the estimates for the random effects $σ_{b_{1i}}, σ_{b_{2i}}$ amd $σ_{b_{3i}}$ that are the same as those of Shuting.
+
+```{r}
+
+freqmod <- nlme(conc ~ SSfol(Dose, Time, lKe, lKa, lCl),
+           data = Theoph,
+           fixed = list(lKe + lKa + lCl ~ 1),
+           random = lKe + lKa + lCl ~ 1 | Subject,
+           start = c(lKe = -2.5, lKa = 0.5, lCl = -3),
+           control = nlmeControl(maxIter = 2000, tolerance = 1e-6))
+summary(freqmod)
+
+# Fixed effects
+fixed.effects(freqmod)
+
+# Random effects
+random_effects = ranef(freqmod)
+
+# # Residuals
+# residuals(freqmod)
+
+# Extract variance components
+variance_components <- VarCorr(freqmod)
+
+# Print the variance components
+print(variance_components)
+
+```
+
+```{r}
+# Reorder the levels of the Subject column - they were in the wrong order
+# Theoph$Subject <- factor(Theoph$Subject, levels = sort(as.numeric(levels(Theoph$Subject))))
+Theoph$Subject <- as.numeric(as.factor(Theoph$Subject))
+# Add predictions to the data
+Theoph$freqpred <- predict(freqmod)  # Population-level predictions
+
+ggplot(Theoph, aes(x = Time, y = conc, color = Subject)) +
+  geom_point(size = 2) +
+  geom_line(aes(y = freqpred), linetype = "dashed") +
+  facet_wrap(~ Subject, scales = "free_y") +  # Facet by Subject
+  labs(
+    title = "One-Compartment Model Fit",
+    x = "Time (hr)",
+    y = "Theophylline concentration (mg/L)"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")  # Remove legend since facets represent subjects
+
+```
+
+## Bayesian approach
+
+```{r}
+Theoph <- datasets::Theoph
+```
+
+```{r}
+# Prepare data for Stan
+stan_data <- list(
+  N = nrow(Theoph),
+  M = length(unique(Theoph$Subject)),
+  y = Theoph$conc,
+  Dose = Theoph$Dose,
+  Time = Theoph$Time,
+  subject = as.numeric(factor(Theoph$Subject))  # Convert subject to numeric index
+)
+
+# Compile and run the Stan model
+stan_model <- stan_model(file = "theoph_model.stan")
+fit <- sampling(stan_model, data = stan_data, iter = 30000, chains = 3, warmup = 5000, seed = 123)
+
+# Summarize the results
+summary <- summary(fit, pars = c("beta1", "beta2", "beta3", "sigma_res", "sigma_b1", "sigma_b2", "sigma_b3"))
+csum <- summary$c_summary
+csum
+```
+
+```{r}
+# posterior_samples <- extract(fit)
+
+# Make predictions
+# beta1 <- mean(posterior_samples$beta1)
+# beta2 <- mean(posterior_samples$beta2)
+# beta3 <- mean(posterior_samples$beta3)
+beta1 <- csum[1]
+beta2 <- csum[2]
+beta3 <- csum[3]
+
+input <- Theoph$Time
+bayes_pred_theo <- (Theoph$Dose * exp(beta1 - beta3) * (exp(-exp(beta2) * input) - exp(-exp(beta1) * input))) / (exp(beta1) - exp(beta2))
+
+Theoph$bayes_pred <- bayes_pred_theo
+
+# Plot the results
+ggplot(Theoph, aes(x = Time, y = conc, color = Subject)) +
+  geom_point(size = 2) +
+  geom_line(aes(y = bayes_pred), linetype = "dashed") +
+  facet_wrap(~ Subject, scales = "free_y") +  # Facet by Subject
+  labs(
+    title = "One-Compartment Model Fit",
+    x = "Time (hr)",
+    y = "Theophylline concentration (mg/L)"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")  # Remove legend since facets represent subjects
+```
+
+```{r}
+# Define the Bayesian model
+code <- nimbleCode({
+  for (i in 1:N) {
+    # Likelihood
+    y[i] ~ dnorm(mu[i], tau)
+    mu[i] <- (Dose[i] * exp(beta1 + b1[subject[i]])) /
+             (exp(beta3 + b3[subject[i]]) * (exp(beta1 + b1[subject[i]]) - exp(beta2 + b2[subject[i]]))) *
+             (exp(-exp(beta2 + b2[subject[i]]) * Time[i]) - exp(-exp(beta1 + b1[subject[i]]) * Time[i]))
+    
+  }
+  
+  # Priors for fixed effects
+  beta1 ~ dnorm(0, 1e-6)
+  beta2 ~ dnorm(0, 1e-6)
+  beta3 ~ dnorm(0, 1e-6)
+  
+  # Priors for random effects (independent)
+  for (j in 1:M) {
+    b1[j] ~ dnorm(0, tau_b1)
+    b2[j] ~ dnorm(0, tau_b2)
+    b3[j] ~ dnorm(0, tau_b3)
+  }
+  
+  # Priors for standard deviations
+  sigma_res ~ dunif(0, 100)
+  sigma_b1 ~ dunif(0, 100)
+  sigma_b2 ~ dunif(0, 100)
+  sigma_b3 ~ dunif(0, 100)
+  
+  # Transform standard deviations to precision
+  tau <- 1 / (sigma_res^2)
+  tau_b1 <- 1 / (sigma_b1^2)
+  tau_b2 <- 1 / (sigma_b2^2)
+  tau_b3 <- 1 / (sigma_b3^2)
+})
+
+# Prepare data
+data <- list(
+  y = Theoph$conc,
+  Dose = Theoph$Dose,
+  Time = Theoph$Time,
+  subject = as.numeric(factor(Theoph$Subject))  # Convert subject to numeric index
+)
+
+# Constants
+constants <- list(
+  N = nrow(Theoph),
+  M = length(unique(Theoph$Subject))  # Number of subjects
+)
+
+# Initial values
+inits <- list(
+  beta1 = rnorm(1, 0, 1),
+  beta2 = rnorm(1, 0, 1),
+  beta3 = rnorm(1, 0, 1),
+  b1 = rnorm(constants$M, 0, 1),
+  b2 = rnorm(constants$M, 0, 1),
+  b3 = rnorm(constants$M, 0, 1),
+  sigma_res = runif(1, 0, 100),
+  sigma_b1 = runif(1, 0, 100),
+  sigma_b2 = runif(1, 0, 100),
+  sigma_b3 = runif(1, 0, 100)
+)
+```
+
+```{r}
+# Build the model
+model <- nimbleModel(code, data = data, constants = constants, inits = inits)
+
+# Compile the model
+compiled_model <- compileNimble(model)
+
+# Configure MCMC
+mcmc_config <- configureMCMC(model)
+
+# Build MCMC
+mcmc <- buildMCMC(mcmc_config)
+
+# Compile MCMC
+compiled_mcmc <- compileNimble(mcmc, project = model)
+
+# Run MCMC
+set.seed(123)
+samples <- runMCMC(compiled_mcmc, niter = 30000, nchains = 3, nburnin = 5000)
+```
+
+```{r}
+# Load MCMCvis
+library(MCMCvis)
+
+# Summarize the results
+samples_summary <- MCMCsummary(samples, round = 8)
+print(samples_summary)
+
+# CHECK FOR CONVERGENCE
+# Check Rhat values
+print(samples_summary[, "Rhat"])
+```
+
+Visualize the results:
+
+```{r}
+# Trace plots and density plots
+# MCMCtrace(samples, params = c("beta1", "beta2", "beta3", "sigma_res", "sigma_b1", "sigma_b2", "sigma_b3"))
+
+```
+
+Not sure how to make predictions with this model... but just follow the same path as earlier and extract the model parameter estimates.
+
+When removing $β_2$ from the numerator (in fitting the model) like it is in Shuting's code we. Note that the model estimate is now also different for the $β_2$ parameter at -0.7762. This is closer to Shuting's answer. But something still feels off from the plot.
+
+```{r}
+set.seed(123)
+
+bayes_pars = samples_summary$mean
+
+
+beta1 <- bayes_pars[1]
+beta2 <- bayes_pars[2]
+beta3 <- bayes_pars[3]
+
+# lKa = exp(beta1)
+# lKe = exp(beta2)
+# lCl = exp(beta3)
+
+input = Theoph$Time
+
+# b1 <- posterior_samples[, paste0("b1[", subject_id, "]")] # How can I add this?
+# b2 <- posterior_samples[, paste0("b2[", subject_id, "]")]
+# b3 <- posterior_samples[, paste0("b3[", subject_id, "]")]
+  
+  # Calculate predictions for each posterior sample
+bayes_pred_theo <- (Theoph$Dose * exp(beta1-beta3) * (exp(-exp(beta2)*input) - exp(-exp(beta1)*input)))/ (exp(beta1) - exp(beta2))
+
+Theoph$bayes_pred <- bayes_pred_theo
+
+ggplot(Theoph, aes(x = Time, y = conc, color = Subject)) +
+  geom_point(size = 2) +
+  geom_line(aes(y = bayes_pred), linetype = "dashed") +
+  facet_wrap(~ Subject, scales = "free_y") +  # Facet by Subject
+  labs(
+    title = "One-Compartment Model Fit",
+    x = "Time (hr)",
+    y = "Theophylline concentration (mg/L)"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")  # Remove legend since facets represent subjects
+```
