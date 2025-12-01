@@ -20,7 +20,6 @@ The FUP has the theoretical advantages of being transformation invariant and sat
 ## Repository Structure
 
 ```
-C:
 .
 |   README.md
 +---Fixed-effects models
