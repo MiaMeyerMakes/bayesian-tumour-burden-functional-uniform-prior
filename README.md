@@ -20,20 +20,48 @@ The FUP has the theoretical advantages of being transformation invariant and sat
 ## Repository Structure
 
 ```
-. 
-├── data/                   # Raw and processed data files
-├── src/                    # Source code
-│   ├── algorithms/        # Core algorithm implementations
-│   ├── models/            # Mathematical models
-│   ├── utils/             # Utility functions
-│   └── visualization/     # Plotting and visualization scripts
-├── experiments/           # Experimental scripts and configurations
-├── results/               # Output files, figures, tables
-├── tests/                 # Unit tests and validation scripts
-├── docs/                  # Additional documentation
-├── requirements.txt       # Python dependencies (or environment. yml)
-├── LICENSE               # License information
-└── README. md             # This file
+.
+├── Fixed-effects models
+│   ├── Emax-Jeffreys-MH-3April.R
+│   ├── Emax-MH-3April.R
+│   ├── Emax-Unif-MH-8April.R
+│   ├── Exp-Jeffreys-MH-6April.R
+│   ├── Exp-MH-19May.R
+│   ├── Exp-Unif-MH-8April.R
+│   ├── Power-Jeffreys-MH-8April.R
+│   ├── Power-MH-8April.R
+│   ├── Power-Unif-MH-8April.R
+│   ├── sensitivity_analysis_emax_v2.R
+│   ├── sensitivity_analysis_exponential.R
+│   └── sensitivity_analysis_power.R
+├── GitHub repo.Rproj
+├── Literature review studies
+│   ├── Introduction_code copy.Rmd
+│   ├── Introduction_code.Rmd
+│   ├── Introduction_Theoph-compare-colours.R
+│   └── trace_plots.pdf
+├── Mixed-effects models
+│   ├── growth_stan_mixed_FUP-final.R
+│   ├── growth_stan_mixed_JEFF-final.R
+│   ├── growth_stan_mixed_UNIF-final.R
+│   ├── mixed-tgi-MHstan-fup-reps-v7-newdata.R
+│   ├── mixed-tgi-MHstan-jeffreys-reps-newdata-v2.R
+│   ├── mixed-tgi-MHstan-uniform-reps-MEDIUM-newdata.R
+│   ├── mixed-tgi-MHstan-uniform-reps-NARROW-newdata.R
+│   ├── mixed-tgi-MHstan-uniform-reps-WIDE-newdata.R
+│   ├── shrinkage_stan_mixed_FUP-final.R
+│   ├── shrinkage_stan_mixed_JEFF-final.R
+│   ├── shrinkage_stan_mixed_UNIF-final.R
+│   ├── tgi-mixed-debug.R
+│   └── tgi-mixed-process-results.R
+└── Prime study
+    ├── dataset_filter.R
+    ├── mixed-tgi-MHstan-fup-PRIME-v1.R
+    ├── mixed-tgi-MHstan-jeff-PRIME-v1.R
+    ├── mixed-tgi-MHstan-unif-PRIME-v1.R
+    ├── prime_intro.R
+    ├── results_analysis.R
+    └── tgi-prime-plots.R
 ```
 
 ## Installation
