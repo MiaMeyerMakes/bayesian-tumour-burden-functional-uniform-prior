@@ -67,30 +67,6 @@ The FUP has the theoretical advantages of being transformation invariant and sat
 - R version 4.4.1 or higher
 - Key dependencies: rstan, nimble, ggplot2, nmle
 
-### Setup
-
-```bash
-# Clone the repository
-git clone https://github.com/[username]/[repository-name].git
-cd [repository-name]
-```
-
-## Usage
-
-### Reproducing Main Results
-
-[Provide clear instructions for reproducing key results from your thesis]
-
-```bash
-# Example command to run main experiment
-python experiments/main_experiment.py --config config/default.yaml
-```
-
-### Key Scripts
-
-- `src/algorithms/[algorithm_name].py`: Implementation of [Algorithm Name] described in Section X. X
-- `experiments/[experiment_name].py`: Generates results for Figure X.X / Table X.X
-- `src/models/[model_name].py`: Mathematical model from Chapter X
 
 ## Citation
 
